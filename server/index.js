@@ -13,6 +13,7 @@ const {
   MAX_DESCENDANT_GENERATIONS,
 } = require('./familyGraph');
 const { layoutFamilyChart } = require('./familyChart');
+const { findCriticalLinks } = require('./criticalLinks');
 const { parseLocalDate, upcomingAnniversaries } = require('./anniversaries');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -622,6 +623,44 @@ app.get('/api/family-chart', (req, res) => {
       parentName: nameOf(e.parentId),
       childId: e.childId,
       childName: nameOf(e.childId),
+    })),
+  });
+});
+
+/**
+ * 关键连接（桥梁关系）分析（只读，不写入任何数据、不推进版本）：
+ * 把当前全部成员与父母→子女关系视为无向连接，按连通分量（原本互不连通的家族）
+ * 分别找出「移除单条就会拆开其家族」的桥梁关系；每条给出关系两端、所属家族，
+ * 以及断开后原家族两侧（父母一侧 / 子女一侧）各自的成员数与姓名名单。
+ * 两端之间仍有其他连接路径的关系不会被误报。空谱返回 empty: true。
+ * 响应携带当前家谱版本 version，页面据此在家谱写入后提示重新计算。
+ */
+app.get('/api/critical-links', (req, res) => {
+  const result = findCriticalLinks(store.getState());
+  const byId = new Map(store.list().members.map((m) => [m.id, m.name]));
+  const nameOf = (id) => byId.get(id) || '（已删除）';
+  const decorateSide = (ids) => ({ count: ids.length, members: ids.map((id) => ({ id, name: nameOf(id) })) });
+  res.json({
+    version: store.getVersion(),
+    empty: result.empty,
+    memberCount: result.memberCount,
+    edgeCount: result.edgeCount,
+    componentCount: result.componentCount,
+    components: result.components.map((c) => ({
+      index: c.index,
+      memberCount: c.memberIds.length,
+      bridgeCount: c.bridgeCount,
+    })),
+    bridgeCount: result.bridgeCount,
+    bridges: result.bridges.map((b) => ({
+      parentId: b.parentId,
+      parentName: nameOf(b.parentId),
+      childId: b.childId,
+      childName: nameOf(b.childId),
+      componentIndex: b.componentIndex,
+      componentMemberCount: b.componentMemberCount,
+      parentSide: decorateSide(b.parentSide),
+      childSide: decorateSide(b.childSide),
     })),
   });
 });

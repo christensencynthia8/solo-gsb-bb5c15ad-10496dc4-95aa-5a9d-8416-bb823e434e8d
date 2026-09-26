@@ -74,6 +74,12 @@ let chartResult = null;
 let chartStale = false;
 let chartStaleReason = '';
 
+// 最近一次关键连接分析结果（服务端返回，含 version 与桥梁明细）
+// 结果保持展示；家谱发生写入后标记为过期并提示重新计算
+let criticalResult = null;
+let criticalStale = false;
+let criticalStaleReason = '';
+
 const $ = (id) => document.getElementById(id);
 
 /** 安全创建 DOM 元素，避免 innerHTML 注入 */
@@ -146,6 +152,9 @@ async function refresh() {
   if (versionChanged && chartResult && !chartStale) {
     invalidateChartResult('家谱已发生写入，以下关系图基于旧版本，请重新生成');
   }
+  if (versionChanged && criticalResult && !criticalStale) {
+    invalidateCriticalResult('家谱已发生写入，以下关键连接结果基于旧版本，请重新计算');
+  }
   render();
   loadUpcoming();
 }
@@ -172,6 +181,9 @@ function applyStateAndRender(data) {
   }
   if (versionChanged && chartResult && !chartStale) {
     invalidateChartResult('家谱已发生写入，以下关系图基于旧版本，请重新生成');
+  }
+  if (versionChanged && criticalResult && !criticalStale) {
+    invalidateCriticalResult('家谱已发生写入，以下关键连接结果基于旧版本，请重新计算');
   }
   render();
   loadUpcoming();
@@ -465,6 +477,11 @@ function renderStaleBanner() {
     $('chart-result'),
     chartStale,
     `⚠️ ${chartStaleReason || '家谱在上次生成后发生过写入，以下关系图可能已过期，请重新生成。'}`,
+  );
+  renderOneStaleBanner(
+    $('critical-result'),
+    criticalStale,
+    `⚠️ ${criticalStaleReason || '家谱在上次计算后发生过写入，以下关键连接结果可能已过期，请重新计算。'}`,
   );
   // 结果过期或尚未生成时禁止下载，避免导出与展示不一致的旧数据
   $('branch-export').disabled = !(branchResult && !branchStale);
@@ -1916,6 +1933,125 @@ function renderChartResult(data) {
   chartSvgEl = svg;
   chartViewportEl = viewport;
   resetChartView();
+}
+
+/* ---------------- 关键连接 ---------------- */
+
+function invalidateCriticalResult(reason) {
+  criticalStale = true;
+  criticalStaleReason = reason;
+  renderStaleBanner();
+}
+
+/** 查找关键连接：只读查询，服务端按当前最新家谱状态计算 */
+$('critical-generate').addEventListener('click', async () => {
+  try {
+    const data = await api('/api/critical-links');
+    criticalResult = data;
+    criticalStale = false;
+    criticalStaleReason = '';
+    renderCriticalResult(data);
+    renderStaleBanner();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+/** 渲染断开后一侧的成员名单（姓名芯片） */
+function renderCriticalSide(label, side) {
+  const col = el('div', { class: 'path-col' });
+  col.appendChild(el('h4', { text: `${label}（${side.count} 人）` }));
+  const chips = el('div', { class: 'member-chips' });
+  for (const m of side.members) {
+    chips.appendChild(el('span', { class: 'member-chip', text: m.name }));
+  }
+  col.appendChild(chips);
+  return col;
+}
+
+function renderCriticalBlock(b, index) {
+  const block = el('div', { class: 'critical-block ancestor-block' });
+  block.appendChild(el('h3', {}, [
+    document.createTextNode(`关键连接 ${index + 1}：「`),
+    el('strong', { text: b.parentName }),
+    document.createTextNode(' → '),
+    el('strong', { text: b.childName }),
+    document.createTextNode(`」（第 ${b.componentIndex + 1} 个家族）`),
+  ]));
+  block.appendChild(el('p', { class: 'ancestor-meta' }, [
+    document.createTextNode('这条关系是两侧成员之间'),
+    el('strong', { class: 'conflict-diff', text: '唯一的连接' }),
+    document.createTextNode(
+      `：断开后原家族（${b.componentMemberCount} 人）将拆分为 ` +
+      `${b.parentSide.count} 人与 ${b.childSide.count} 人两部分。`,
+    ),
+  ]));
+  const paths = el('div', { class: 'paths' });
+  paths.appendChild(renderCriticalSide(`父母「${b.parentName}」一侧`, b.parentSide));
+  paths.appendChild(renderCriticalSide(`子女「${b.childName}」一侧`, b.childSide));
+  block.appendChild(paths);
+  return block;
+}
+
+function renderCriticalResult(data) {
+  const box = $('critical-result');
+  box.replaceChildren();
+  box.dataset.hasResult = '1';
+
+  // 空谱：明确提示，不做分析
+  if (data.empty) {
+    box.appendChild(el('div', { class: 'summary no-match' }, [
+      el('strong', { text: '空谱：当前家谱没有任何成员，无法分析关键连接。' }),
+      el('div', {
+        text: '请先在「① 成员」中录入成员，并在「② 父母 → 子女关系」中建立关系，再重新查找关键连接。',
+      }),
+    ]));
+    return;
+  }
+
+  const summary = el('div', { class: 'summary' });
+  summary.appendChild(el('div', {}, [
+    document.createTextNode('关键连接分析（只读）：共 '),
+    el('strong', { text: `${data.memberCount} 名成员` }),
+    document.createTextNode('、'),
+    el('strong', { text: `${data.edgeCount} 条关系` }),
+    document.createTextNode('，按忽略方向划分为 '),
+    el('strong', { text: `${data.componentCount} 个家族` }),
+    document.createTextNode(`（基于家谱版本 ${data.version}）。`),
+  ]));
+  // 原本互不连通的家族分别计算：多于一个家族时给出各家族明细
+  if (data.componentCount > 1) {
+    summary.appendChild(el('div', {
+      class: 'empty-hint',
+      text:
+        `各家族分别计算：${data.components
+          .map((c) => `第 ${c.index + 1} 个家族 ${c.memberCount} 人（关键连接 ${c.bridgeCount} 条）`)
+          .join('；')}。`,
+    }));
+  }
+  box.appendChild(summary);
+
+  // 无桥梁：明确提示
+  if (data.bridgeCount === 0) {
+    summary.appendChild(el('div', {}, [
+      el('strong', { text: '未发现关键连接' }),
+      document.createTextNode('：没有任何一条关系被移除后会拆开其所在家族。'),
+    ]));
+    summary.appendChild(el('div', {
+      class: 'empty-hint',
+      text: data.edgeCount === 0
+        ? '当前家谱还没有任何父母→子女关系；建立关系后可重新查找。'
+        : '每条关系的两端之间都另有连接路径（或其所在家族只有一名成员），移除单条关系不会使家族断开。',
+    }));
+    return;
+  }
+
+  summary.appendChild(el('div', {}, [
+    document.createTextNode('共发现 '),
+    el('strong', { class: 'conflict-diff', text: `${data.bridgeCount} 条关键连接` }),
+    document.createTextNode('：移除其中任意一条，其所在家族都会断开为两部分；逐条明细如下。'),
+  ]));
+  data.bridges.forEach((b, i) => box.appendChild(renderCriticalBlock(b, i)));
 }
 
 /* ---------------- 备份与恢复 ---------------- */

@@ -712,3 +712,20 @@ button.link-action:hover { text-decoration: underline; background: none; }
 }
 
 .chart-svg.panning { cursor: grabbing; }
+
+/* 关键连接 */
+.critical-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.critical-block { border-color: #fcd34d; }
+
+.member-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
