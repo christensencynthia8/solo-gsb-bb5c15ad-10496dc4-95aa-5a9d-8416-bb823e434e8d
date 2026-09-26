@@ -22,7 +22,9 @@
       「后代支系视图」可选择始祖与 1～10 代上限提取后代：同一后代只显示一次、按最短代数分组并标记所属分支，
       仅展示支系内亲子关系，结果可下载为局部导出的 JSON；
       「整谱关系图」把全部成员与父母→子女关系绘成可缩放的分层 SVG（按连通分量分组、最长父母链分层，
-      图上标注生成时的家谱版本），可下载，整个模块只读。
+      图上标注生成时的家谱版本），可下载，整个模块只读；
+      「关键连接」把全部关系视为无向连接，找出移除单条关系就会拆开其原连通家族的桥梁关系，
+      逐条展示关系两端与断开后两侧的成员数和姓名，空谱或无桥梁时明确提示，同样只读。
     </p>
   </header>
 
@@ -300,6 +302,23 @@
       </p>
       <div id="chart-result" class="result chart-result" aria-live="polite">
         <p class="placeholder">点击「生成整谱关系图」查看当前家谱的整体结构。</p>
+      </div>
+    </section>
+
+    <!-- 关键连接（桥梁关系） -->
+    <section class="card wide" aria-labelledby="critical-title">
+      <h2 id="critical-title">⑩ 关键连接</h2>
+      <div class="chart-toolbar">
+        <button type="button" id="critical-generate" class="primary">计算关键连接</button>
+      </div>
+      <p class="empty-hint">
+        把当前全部成员与「父母 → 子女」关系视为<strong>无向连接</strong>，找出<strong>桥梁关系</strong>：
+        移除这一条关系就会把它原本所在的连通家族拆成两部分。逐条展示关系两端，以及断开后原家族
+        <strong>两侧的成员数与姓名</strong>。原本互不连通的家族分别计算；仍有其他连接路径的关系
+        （处于环上）不会误报。结果标注所依据的家谱版本；整个模块只读，家谱写入后请重新计算。
+      </p>
+      <div id="critical-result" class="result" aria-live="polite">
+        <p class="placeholder">点击「计算关键连接」查看当前家谱中的桥梁关系。</p>
       </div>
     </section>
   </main>
